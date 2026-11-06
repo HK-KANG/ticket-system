@@ -70,6 +70,16 @@
       <scope>runtime</scope>
     </dependency>
 
+    <!-- Flyway：版本化建表（技术栈表里已列）。Spring Boot 3.5 管理版本，MySQL 需额外的 flyway-mysql 模块 -->
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+
     <!-- Excel 导出 -->
     <dependency>
       <groupId>com.alibaba</groupId>
