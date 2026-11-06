@@ -88,9 +88,12 @@ $r = Call 'GET' "/api/ticket/page?page=1&size=100" $zhang $null
 $j = $r.body | ConvertFrom-Json
 Check 'T3-customer-sees-own' ($j.data.total -ge 1) ("total=" + $j.data.total)
 
+# T4 asserts isolation, not "limei has zero tickets" -- she may have created her own
+# while trying the UI, which is legitimate data and must not break the check.
 $r = Call 'GET' "/api/ticket/page?page=1&size=100" $limei $null
 $j = $r.body | ConvertFrom-Json
-Check 'T4-other-customer-cannot-see' ($j.data.total -eq 0) ("limei total=" + $j.data.total)
+$leak = @($j.data.records | Where-Object { $_.ticketNo -eq $ticketNo }).Count
+Check 'T4-other-customer-cannot-see' ($leak -eq 0) ("limei sees " + $leak + " of zhangsan's ticket; her own total=" + $j.data.total)
 
 $r = Call 'GET' ("/api/ticket/" + $ticketId) $limei $null
 $j = $r.body | ConvertFrom-Json
