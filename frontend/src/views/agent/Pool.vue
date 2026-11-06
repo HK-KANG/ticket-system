@@ -10,9 +10,8 @@
       <el-button :icon="Refresh" @click="load">立即刷新</el-button>
     </div>
 
-    <el-alert type="info" :closable="false" show-icon style="margin-bottom: 14px"
-              title="抢单功能在 Phase 4 上线"
-              description="现在这里展示的是真实的待派单工单（按你的技能组过滤），抢单按钮暂不可用——那需要乐观锁和并发测试，单独一个阶段做。" />
+    <el-alert v-if="lastError" type="warning" :closable="true" show-icon style="margin-bottom: 14px"
+              :title="lastError" @close="lastError = ''" />
 
     <el-empty v-if="!loading && list.length === 0" description="本组暂无待派单工单" />
 
@@ -37,9 +36,9 @@
 
         <div class="foot">
           <span class="time">{{ fmtSla(t.createTime) }}</span>
-          <el-tooltip content="Phase 4 实现（乐观锁抢单）" placement="top">
-            <span><el-button type="primary" size="small" disabled>抢单</el-button></span>
-          </el-tooltip>
+          <el-button type="primary" size="small" :loading="grabbing === t.id" @click.stop="onGrab(t)">
+            抢单
+          </el-button>
         </div>
       </el-card>
     </div>
@@ -49,14 +48,17 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Timer } from '@element-plus/icons-vue'
-import { pageTickets } from '@/api/ticket'
+import { pageTickets, acceptTicket } from '@/api/ticket'
 import { priorityType, remainingText, fmtSla } from '@/utils/dict'
 
 const router = useRouter()
 const list = ref([])
 const loading = ref(false)
 const lastRefresh = ref('-')
+const grabbing = ref(null)
+const lastError = ref('')
 
 let timer = null
 let ticker = null
@@ -75,6 +77,35 @@ async function load() {
 
 function openDetail(row) {
   router.push(`/agent/ticket/${row.id}`)
+}
+
+/**
+ * 抢单。失败有两种：被别的坐席抢走（最常见）、或不在本组。
+ * 无论哪种都要立刻刷新列表——失败说明数据已经变了，不能让用户看着旧卡片再点一次。
+ */
+async function onGrab(ticket) {
+  try {
+    await ElMessageBox.confirm(`确认接单：${ticket.title}？`, '抢单确认', {
+      confirmButtonText: '确认接单',
+      cancelButtonText: '再看看',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  grabbing.value = ticket.id
+  try {
+    await acceptTicket(ticket.id)
+    ElMessage.success('抢单成功，工单已进入你的处理列表')
+    await load()
+  } catch (e) {
+    lastError.value = e.message || '抢单失败'
+    ElMessageBox.alert(lastError.value, '手慢了', { confirmButtonText: '刷新看看', type: 'error' })
+      .finally(load)
+  } finally {
+    grabbing.value = null
+  }
 }
 
 onMounted(() => {

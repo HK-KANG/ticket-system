@@ -55,3 +55,29 @@ export function getStats() {
 export function listAgents() {
   return service.get('/user/agents')
 }
+
+/**
+ * 抢单（乐观锁版本，生产用这个）。
+ * 并发下只有一个坐席成功，其余返回业务错误「已被其他坐席抢走」。
+ */
+export function acceptTicket(id) {
+  return service.post(`/ticket/${id}/accept`)
+}
+
+/**
+ * 抢单（Redis 分布式锁版本）。
+ * 只用于并发对比实验，页面默认不调它。
+ */
+export function acceptTicketWithLock(id) {
+  return service.post(`/ticket/${id}/accept-lock`)
+}
+
+/** 自动派单（仅管理员）：按技能组把单指派给当前最闲的在线坐席 */
+export function autoDispatchTicket(id) {
+  return service.post(`/ticket/${id}/auto-dispatch`)
+}
+
+/** 标记已解决（处理人或管理员） */
+export function resolveTicket(id, data) {
+  return service.post(`/ticket/${id}/resolve`, data)
+}

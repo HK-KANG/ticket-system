@@ -103,6 +103,52 @@ public class TicketController {
     }
 
     /**
+     * 抢单 —— 乐观锁版本（默认用这个）。
+     *
+     * <p>20 个坐席同时抢，只有一个能成功，其余拿到「已被他人抢走」。
+     */
+    @Operation(summary = "抢单（乐观锁）", description = "并发下只有一个坐席成功，其余返回业务错误")
+    @RequireRole("AGENT")
+    @PostMapping("/{id}/accept")
+    public Result<Void> accept(@PathVariable Long id) {
+        ticketService.acceptOptimistic(id);
+        return Result.ok();
+    }
+
+    /**
+     * 抢单 —— Redis 分布式锁版本，仅用于并发对比实验。
+     */
+    @Operation(summary = "抢单（Redis 锁）", description = "对比实验用；生产默认走 /accept")
+    @RequireRole("AGENT")
+    @PostMapping("/{id}/accept-lock")
+    public Result<Void> acceptWithLock(@PathVariable Long id) {
+        ticketService.acceptWithLock(id);
+        return Result.ok();
+    }
+
+    /**
+     * 自动派单：按技能组把单指派给当前最闲的在线坐席。
+     */
+    @Operation(summary = "自动派单", description = "仅管理员；按技能组找负载最低的在线坐席")
+    @RequireRole("ADMIN")
+    @PostMapping("/{id}/auto-dispatch")
+    public Result<Void> autoDispatch(@PathVariable Long id) {
+        ticketService.autoDispatch(id);
+        return Result.ok();
+    }
+
+    /**
+     * 标记已解决。
+     */
+    @Operation(summary = "标记解决", description = "处理人把工单从处理中推进到已解决")
+    @RequireRole({"AGENT", "ADMIN"})
+    @PostMapping("/{id}/resolve")
+    public Result<Void> resolve(@PathVariable Long id, @Valid @RequestBody TicketCloseRequest req) {
+        ticketService.resolve(id, req);
+        return Result.ok();
+    }
+
+    /**
      * 工单统计，仅管理员。
      */
     @Operation(summary = "统计", description = "状态/分类/优先级分布、SLA 达成率、近 7 天趋势")

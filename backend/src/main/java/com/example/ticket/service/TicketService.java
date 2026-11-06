@@ -2,8 +2,11 @@ package com.example.ticket.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.example.ticket.common.BizException;
+import com.example.ticket.common.ForbiddenException;
 import com.example.ticket.common.NotFoundException;
 import com.example.ticket.common.PageResult;
 import com.example.ticket.common.ResultCode;
@@ -35,6 +38,7 @@ import com.example.ticket.vo.TicketVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -44,11 +48,13 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -72,6 +78,19 @@ public class TicketService {
 
     /** 工单单号在 Redis 里的计数器前缀，按天分 key */
     private static final String NO_KEY_PREFIX = "ticket:no:";
+
+    /** 抢单分布式锁的 key 前缀 */
+    private static final String ACCEPT_LOCK_PREFIX = "lock:ticket:accept:";
+
+    /**
+     * 释放锁的 Lua 脚本。
+     *
+     * <p>为什么必须用 Lua 而不是先 get 再 del：get 和 del 之间锁可能刚好过期并被别人拿走，
+     * 这时 del 会删掉别人的锁。Lua 脚本在 Redis 内单线程执行，判断和删除是一个原子操作。
+     */
+    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
+            Long.class);
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
@@ -379,6 +398,198 @@ public class TicketService {
 
         writeLog(id, from, to, user.userId(), "CLOSE",
                 StringUtils.hasText(req.getResolution()) ? req.getResolution() : "关闭工单");
+    }
+
+    // ==================================================================
+    // 派单与抢单（Phase 4 核心：并发）
+    // ==================================================================
+
+    /**
+     * 抢单 —— 版本 A：数据库乐观锁。
+     *
+     * <p>核心 SQL（由 MyBatis-Plus 拼出）：
+     * <pre>
+     * UPDATE t_ticket SET handler_id=?, status='PROCESSING', accept_time=?, version=version+1
+     * WHERE id=? AND status='PENDING' AND handler_id IS NULL AND version=?
+     * </pre>
+     *
+     * <p>为什么这样能防住并发：UPDATE 会对这一行加行锁，20 个请求排队执行；
+     * 第一个改成功后 version 自增，后面 19 个的 {@code version=?} 条件不再成立，
+     * 影响行数为 0 —— 这就是"只有一个人能抢到"的全部原理。
+     *
+     * <p>为什么不用悲观锁（SELECT ... FOR UPDATE）：抢单是高频短事务，
+     * 悲观锁会让 20 个请求全部排队持锁等待，吞吐更低；乐观锁只在写的一瞬间竞争。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void acceptOptimistic(Long id) {
+        LoginUser user = UserContext.require();
+        doAccept(id, user.userId(), "OPTIMISTIC");
+    }
+
+    /**
+     * 抢单 —— 版本 B：Redis 分布式锁。
+     *
+     * <p>先用 SETNX 抢占 {@code lock:ticket:accept:{id}}，抢到的才去改数据库，
+     * 没抢到的直接返回失败，连数据库都不碰。
+     *
+     * <p>两个必须做对的细节：
+     * <ul>
+     *   <li>锁必须有过期时间（30 秒），否则进程崩溃会导致这把锁永远不释放</li>
+     *   <li>释放必须用 Lua 比对 value，否则可能删掉别人刚抢到的锁</li>
+     * </ul>
+     *
+     * <p>这两个版本刻意都保留，用来做并发对比实验，详见 docs/concurrency-compare.md。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void acceptWithLock(Long id) {
+        LoginUser user = UserContext.require();
+        String key = ACCEPT_LOCK_PREFIX + id;
+        String token = UUID.randomUUID().toString();
+
+        Boolean got = redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(30));
+        if (!Boolean.TRUE.equals(got)) {
+            throw new BizException(ResultCode.BIZ_ERROR, "手慢了，这单正在被其他坐席抢");
+        }
+        try {
+            doAccept(id, user.userId(), "REDIS_LOCK");
+        } finally {
+            // 无论成功失败都要释放锁，用 Lua 保证"判断是自己的锁"和"删除"是原子的
+            redis.execute(UNLOCK_SCRIPT, Collections.singletonList(key), token);
+        }
+    }
+
+    /**
+     * 抢单的公共逻辑：校验 → 乐观锁更新 → 写日志。
+     *
+     * @param mode 记录用，区分是乐观锁还是 Redis 锁抢到的，排查时能看出走了哪条路
+     */
+    private void doAccept(Long id, Long agentId, String mode) {
+        Ticket t = requireTicket(id);
+        User me = userMapper.selectById(agentId);
+        if (me == null || !"AGENT".equals(me.getRole())) {
+            throw new ForbiddenException("只有坐席可以抢单");
+        }
+        // 只能抢本组的单：否则售后一组的人能把物流组的单抢走
+        if (StringUtils.hasText(t.getSkillGroup()) && !t.getSkillGroup().equals(me.getSkillGroup())) {
+            throw new ForbiddenException("只能抢本组的工单");
+        }
+        if (!TicketStatusEnum.PENDING.name().equals(t.getStatus()) || t.getHandlerId() != null) {
+            throw new BizException(ResultCode.BIZ_ERROR, "手慢了，这单已被其他坐席抢走");
+        }
+
+        LambdaUpdateWrapper<Ticket> uw = Wrappers.<Ticket>lambdaUpdate()
+                .eq(Ticket::getId, id)
+                .eq(Ticket::getStatus, TicketStatusEnum.PENDING.name())
+                .isNull(Ticket::getHandlerId)
+                .eq(Ticket::getVersion, t.getVersion())
+                .set(Ticket::getHandlerId, agentId)
+                .set(Ticket::getStatus, TicketStatusEnum.PROCESSING.name())
+                .set(Ticket::getAcceptTime, LocalDateTime.now())
+                .setSql("version = version + 1");
+
+        int rows = ticketMapper.update(null, uw);
+        if (rows == 0) {
+            throw new BizException(ResultCode.BIZ_ERROR, "手慢了，这单已被其他坐席抢走");
+        }
+        writeLog(id, TicketStatusEnum.PENDING, TicketStatusEnum.PROCESSING, agentId, "ACCEPT",
+                "抢单成功（" + mode + "）");
+        log.info("抢单成功 ticketId={} agentId={} mode={} oldVersion={}", id, agentId, mode, t.getVersion());
+    }
+
+    /**
+     * 自动派单：按技能组找最闲的在线坐席，直接指派。
+     *
+     * <p>选人规则：同技能组 + 在线 + 当前在办数 < 上限，按在办数升序取第一个。
+     * 这样负载低的坐席先被分配，避免一个人堆单、别人闲着。
+     *
+     * <p>指派同样走乐观锁更新：如果这一瞬间客户把单撤了或有别人抢了，影响行数为 0，直接报错。
+     * 通知坐席的 MQ 消息留到 Phase 5 一起做。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void autoDispatch(Long id) {
+        LoginUser user = UserContext.require();
+        Ticket t = requireTicket(id);
+        if (!TicketStatusEnum.PENDING.name().equals(t.getStatus()) || t.getHandlerId() != null) {
+            throw new BizException(ResultCode.BIZ_ERROR, "该工单已被处理，无需派单");
+        }
+
+        List<User> candidates = userMapper.selectList(new LambdaQueryWrapper<User>()
+                .eq(User::getRole, "AGENT")
+                .eq(User::getStatus, "ONLINE")
+                .eq(StringUtils.hasText(t.getSkillGroup()), User::getSkillGroup, t.getSkillGroup()));
+
+        if (candidates.isEmpty()) {
+            throw new BizException(ResultCode.BIZ_ERROR, "该技能组暂无在线坐席");
+        }
+
+        User chosen = null;
+        int minLoad = Integer.MAX_VALUE;
+        for (User a : candidates) {
+            long load = ticketMapper.selectCount(new LambdaQueryWrapper<Ticket>()
+                    .eq(Ticket::getHandlerId, a.getId())
+                    .in(Ticket::getStatus, TicketStatusEnum.PROCESSING.name(), TicketStatusEnum.ASSIGNED.name()));
+            int max = a.getMaxLoad() == null ? 5 : a.getMaxLoad();
+            if (load >= max) {
+                continue;
+            }
+            if (load < minLoad) {
+                minLoad = (int) load;
+                chosen = a;
+            }
+        }
+        if (chosen == null) {
+            throw new BizException(ResultCode.BIZ_ERROR, "该技能组坐席均已达到在处理上限");
+        }
+
+        LambdaUpdateWrapper<Ticket> uw = Wrappers.<Ticket>lambdaUpdate()
+                .eq(Ticket::getId, id)
+                .eq(Ticket::getStatus, TicketStatusEnum.PENDING.name())
+                .isNull(Ticket::getHandlerId)
+                .eq(Ticket::getVersion, t.getVersion())
+                .set(Ticket::getHandlerId, chosen.getId())
+                .set(Ticket::getStatus, TicketStatusEnum.ASSIGNED.name())
+                .setSql("version = version + 1");
+        if (ticketMapper.update(null, uw) == 0) {
+            throw new BizException(ResultCode.BIZ_ERROR, "工单状态已变化，派单失败请重试");
+        }
+
+        TicketDispatch d = new TicketDispatch();
+        d.setTicketId(id);
+        d.setFromHandlerId(null);
+        d.setToHandlerId(chosen.getId());
+        d.setReason("AUTO");
+        dispatchMapper.insert(d);
+
+        writeLog(id, TicketStatusEnum.PENDING, TicketStatusEnum.ASSIGNED, user.userId(), "DISPATCH",
+                "自动派单给 " + chosen.getRealName() + "（当前在办 " + minLoad + " 单）");
+    }
+
+    /**
+     * 标记解决：处理人把工单从「处理中」推进到「已解决」，等客户确认后关闭。
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void resolve(Long id, TicketCloseRequest req) {
+        LoginUser user = UserContext.require();
+        Ticket t = requireTicket(id);
+
+        boolean isAdmin = "ADMIN".equals(user.role());
+        boolean isHandler = user.userId().equals(t.getHandlerId());
+        if (!isAdmin && !isHandler) {
+            throw new ForbiddenException("只有处理人可以标记解决");
+        }
+
+        TicketStatusEnum from = TicketStatusEnum.of(t.getStatus());
+        if (!from.canTransitTo(TicketStatusEnum.RESOLVED)) {
+            throw new BizException(ResultCode.BIZ_ERROR,
+                    "不允许从「" + from.getLabel() + "」标记解决");
+        }
+
+        Ticket update = new Ticket();
+        update.setId(id);
+        update.setStatus(TicketStatusEnum.RESOLVED.name());
+        ticketMapper.updateById(update);
+        writeLog(id, from, TicketStatusEnum.RESOLVED, user.userId(), "RESOLVE",
+                StringUtils.hasText(req.getResolution()) ? req.getResolution() : "标记已解决");
     }
 
     // ==================================================================

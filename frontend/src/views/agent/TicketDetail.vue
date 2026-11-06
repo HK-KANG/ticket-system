@@ -41,11 +41,13 @@
             </div>
 
             <div class="actions">
-              <el-button type="primary" :disabled="ticket.status === 'CLOSED'"
+              <el-button v-if="ticket.status === 'PENDING'" type="primary" :loading="accepting"
+                         @click="doAccept">抢单</el-button>
+              <el-button v-if="canResolve" type="success" @click="resolveVisible = true">标记解决</el-button>
+              <el-button type="primary" plain :disabled="ticket.status === 'CLOSED'"
                          @click="openTransfer">转派</el-button>
               <el-button type="danger" plain :disabled="ticket.status === 'CLOSED'"
                          @click="openClose">关闭工单</el-button>
-              <span class="hint">接单 / 标记解决 在 Phase 4 随抢单一起做</span>
             </div>
           </el-card>
 
@@ -113,6 +115,20 @@
       </template>
     </el-dialog>
 
+    <!-- 标记解决弹窗 -->
+    <el-dialog v-model="resolveVisible" title="标记已解决" width="460px">
+      <el-form label-width="80px">
+        <el-form-item label="处理结果">
+          <el-input v-model="resolveForm.resolution" type="textarea" :rows="3" maxlength="500"
+                    placeholder="写清怎么解决的，会记进流转日志" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="resolveVisible = false">取消</el-button>
+        <el-button type="success" :loading="resolving" @click="doResolve">确认已解决</el-button>
+      </template>
+    </el-dialog>
+
     <!-- D2 关闭弹窗 -->
     <el-dialog v-model="closeVisible" title="关闭工单" width="460px">
       <el-form label-width="80px">
@@ -132,17 +148,24 @@
 <script setup>
 import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { getTicket, commentTicket, transferTicket, closeTicket, listAgents } from '@/api/ticket'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { getTicket, commentTicket, transferTicket, closeTicket, listAgents, acceptTicket, resolveTicket } from '@/api/ticket'
+import { useUserStore } from '@/stores/user'
 import { statusType, priorityType, remainingText, fmtSla } from '@/utils/dict'
 
 const route = useRoute()
+const userStore = useUserStore()
 const loading = ref(false)
 const ticket = ref(null)
 
 const reply = ref('')
 const internal = ref(false)
 const replying = ref(false)
+
+const accepting = ref(false)
+const resolveVisible = ref(false)
+const resolveForm = reactive({ resolution: '' })
+const resolving = ref(false)
 
 const transferVisible = ref(false)
 const transferForm = reactive({ toHandlerId: null, reason: '' })
@@ -162,6 +185,52 @@ const ACTION_LABEL = {
   ESCALATE: '超时升级'
 }
 const actionLabel = (a) => ACTION_LABEL[a] || a
+
+/** 只有处理中的工单、且是本人或管理员，才显示「标记解决」 */
+const canResolve = computed(() => {
+  if (!ticket.value) return false
+  const st = ticket.value.status
+  if (st !== 'PROCESSING' && st !== 'ESCALATED') return false
+  const isAdmin = userStore.role === 'ADMIN'
+  const isHandler = ticket.value.handlerId === userStore.userInfo?.id
+  return isAdmin || isHandler
+})
+
+/** 抢单：PENDING 状态下显示，成功后刷新详情 */
+async function doAccept() {
+  try {
+    await ElMessageBox.confirm('确认接这张单？', '抢单确认', {
+      confirmButtonText: '确认接单',
+      cancelButtonText: '再看看',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  accepting.value = true
+  try {
+    await acceptTicket(ticket.value.id)
+    ElMessage.success('抢单成功')
+    await load()
+  } catch (e) {
+    ElMessage.error(e.message || '抢单失败')
+    await load()
+  } finally {
+    accepting.value = false
+  }
+}
+
+async function doResolve() {
+  resolving.value = true
+  try {
+    await resolveTicket(ticket.value.id, { resolution: resolveForm.resolution })
+    ElMessage.success('已标记为已解决')
+    resolveVisible.value = false
+    await load()
+  } finally {
+    resolving.value = false
+  }
+}
 
 async function load() {
   loading.value = true
