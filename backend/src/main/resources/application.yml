@@ -1,0 +1,23 @@
+# ============================================================
+# 公共配置。环境相关的差异放在 application-local.yml / application-docker.yml
+# ============================================================
+spring:
+  application:
+    name: ticket-system
+  profiles:
+    active: local
+
+server:
+  port: 8080
+
+# 接口文档：springdoc + Swagger UI
+#   UI 地址：http://localhost:8080/swagger-ui.html
+#   JSON   ：http://localhost:8080/v3/api-docs
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+  default-flat-param-object: true

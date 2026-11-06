@@ -1,0 +1,103 @@
+# 本地开发配置（8GB 机器优化版）
+# 敏感值走环境变量，不要把密码写在这里
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 100
+      min-spare: 10
+
+spring:
+  application:
+    name: ticket-system
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/${MYSQL_DATABASE:ticket}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true&rewriteBatchedStatements=true
+    username: root
+    password: ${MYSQL_ROOT_PASSWORD:change_me_123456}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # 8GB 机器，连接池不要开大
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      database: 0
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+  rabbitmq:
+    host: 127.0.0.1
+    port: 5672
+    username: ${RABBITMQ_USER:ticket}
+    password: ${RABBITMQ_PASSWORD:change_me_123456}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 10
+        concurrency: 2
+        max-concurrency: 4
+  threads:
+    virtual:
+      # Phase 6 做虚拟线程对比时再打开，平时关着（省内存，也避免 pinning 干扰）
+      enabled: false
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: Asia/Shanghai
+    default-property-inclusion: non_null
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 20MB
+
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/**/*.xml
+  type-aliases-package: com.example.ticket.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    # 本地开发打印 SQL；上线前改成 NoLoggingImpl 或 slf4j
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+logging:
+  level:
+    root: info
+    com.example.ticket: debug
+  pattern:
+    # %X{traceId} 就是 MDC 里的 traceId，一个请求的全链路日志靠它串起来
+    console: "%d{HH:mm:ss.SSS} [%thread] %-5level [%X{traceId:-}] %logger{36} - %msg%n"
+  file:
+    name: logs/app.log
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+
+# 智能分类：默认走本地关键词规则，不联网
+ticket:
+  ai:
+    enabled: false
+    cache-minutes: 60

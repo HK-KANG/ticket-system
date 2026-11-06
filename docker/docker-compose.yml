@@ -1,0 +1,101 @@
+# 工单系统 · 中间件容器
+# 适配 8GB 内存机器：所有内存参数已压到最小，并加了容器级内存上限
+#
+# 用法（在项目根目录）：
+#   cp .env.example .env        # 然后改密码
+#   docker compose -f docker/docker-compose.yml --env-file .env up -d
+#   docker compose -f docker/docker-compose.yml ps
+#   docker compose -f docker/docker-compose.yml logs -f mysql
+
+name: ticket-system
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: ticket-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ticket}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      # ↓ 关键：默认 128M 是给 16G 机器用的，8G 机器必须压住
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=100
+      - --slow-query-log=1
+      - --long-query-time=1
+      - --slow-query-log-file=/var/lib/mysql/slow.log
+      # 关掉 performance_schema 省 100-200MB
+      - --performance-schema=OFF
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 第一次建库时可放开下面这行，让 schema.sql 自动执行；
+      # 注意：host 目录必须先存在，否则 Docker 会创建一个 root 所有的空目录
+      # - ../backend/src/main/resources/db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: 600M
+
+  redis:
+    # 如果拉不到 8-alpine，改成 redis:7-alpine，功能一样
+    image: redis:8-alpine
+    container_name: ticket-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 200mb
+      --maxmemory-policy allkeys-lru
+      --appendonly no
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  rabbitmq:
+    # 如果拉不到 4-management，改成 rabbitmq:3.13-management
+    image: rabbitmq:4-management
+    container_name: ticket-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-ticket}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # 管理台 http://localhost:15672
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      # RabbitMQ 4.x 移除了 RABBITMQ_VM_MEMORY_HIGH_WATERMARK 环境变量（设了会直接启动失败）
+      # 内存水位改用配置文件设置，见 rabbitmq/rabbitmq.conf
+      - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 400M
+
+volumes:
+  mysql-data:
+  rabbitmq-data:
