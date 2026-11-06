@@ -1,6 +1,8 @@
 package com.example.ticket.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -65,10 +67,12 @@ public class Ticket {
     /** 是否已升级：0 否 / 1 是，防止重复升级 */
     private Integer escalateFlag;
 
-    /** 创建时间 */
+    /** 创建时间，自动填充 */
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
-    /** 更新时间 */
+    /** 更新时间，自动填充 */
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
     /** 逻辑删除标记 */

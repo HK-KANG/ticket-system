@@ -1,6 +1,8 @@
 package com.example.ticket.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -41,10 +43,12 @@ public class User {
     /** 同时处理工单上限，派单时判满 */
     private Integer maxLoad;
 
-    /** 创建时间，由数据库默认值填充 */
+    /** 创建时间，由 MyMetaObjectHandler 自动填充 */
+    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
-    /** 更新时间，由数据库自动维护 */
+    /** 更新时间，插入和更新时都自动填充 */
+    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updateTime;
 
     /** 逻辑删除标记：0 正常 / 1 已删。

@@ -25,6 +25,7 @@
     <!-- 不用 Knife4j：它最后版本 4.5.0 只兼容 springdoc 2.3 / Spring 6.1，
          在 Boot 3.5（Spring 6.2）上两种组合都抛 NoSuchMethodError。详见依赖处的注释。 -->
     <springdoc.version>2.8.13</springdoc.version>
+    <jjwt.version>0.12.6</jjwt.version>
   </properties>
 
   <dependencies>
@@ -102,6 +103,26 @@
     <dependency>
       <groupId>org.springframework.security</groupId>
       <artifactId>spring-security-crypto</artifactId>
+    </dependency>
+
+    <!-- JWT 签发与校验。任务书写「自研 JWT + 拦截器」，指的是不用 Sa-Token 那类框架，
+         但签名/过期/Base64 这些底层必须交给成熟库，否则自己拼更容易出错 -->
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-api</artifactId>
+      <version>${jjwt.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-impl</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-jackson</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
     </dependency>
 
     <dependency>

@@ -1,0 +1,63 @@
+/* 全局基础样式：只做最小重置，具体皮肤交给 Element Plus */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
+  font-size: 14px;
+  color: #303133;
+  background: #f5f7fa;
+}
+
+/* 只做 PC 端，最小宽度锁在 1280（任务书前端约束第 2 条） */
+#app {
+  min-width: 1280px;
+}
+
+.page {
+  padding: 16px;
+}
+
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.page-desc {
+  color: #909399;
+  font-size: 13px;
+  margin: 0 0 16px;
+}
+
+/* 占位页样式：还没实现的页面用它，避免一片空白让人以为是坏了 */
+.placeholder {
+  background: #fff;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  padding: 48px 24px;
+  text-align: center;
+  color: #909399;
+}
+
+.placeholder h3 {
+  color: #303133;
+  margin: 0 0 8px;
+}
+
+.placeholder ul {
+  display: inline-block;
+  text-align: left;
+  margin: 12px 0 0;
+  padding-left: 20px;
+  line-height: 1.9;
+}

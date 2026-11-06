@@ -27,12 +27,17 @@ spring:
       host: 127.0.0.1
       port: 6379
       database: 0
-      timeout: 2000ms
+      # 2s 太紧：WSL 端口转发首次握手会超过 2 秒，导致登录偶发 500。放宽到 5s
+      timeout: 5000ms
+      connect-timeout: 5000ms
       lettuce:
+        shutdown-timeout: 200ms
         pool:
           max-active: 8
           max-idle: 4
           min-idle: 1
+          # 提前建好连接，避免第一个请求承担握手耗时
+          time-between-eviction-runs: 30s
   rabbitmq:
     host: 127.0.0.1
     port: 5672
@@ -101,3 +106,8 @@ ticket:
   ai:
     enabled: false
     cache-minutes: 60
+  jwt:
+    # 生产环境必须用环境变量覆盖；HS256 要求至少 32 字节
+    secret: ${TICKET_JWT_SECRET:ticket-system-dev-secret-key-do-not-use-in-prod-2026}
+    # 令牌有效期（分钟），与 Redis TTL 一致
+    expire-minutes: 120

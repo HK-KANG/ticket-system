@@ -2,6 +2,7 @@ package com.example.ticket.common;
 
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
@@ -9,6 +10,7 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.NoHandlerFoundException;
@@ -23,6 +25,22 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** 未登录 / 令牌失效：HTTP 401 + 统一 Result */
+    @ExceptionHandler(AuthException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public Result<Void> handleAuth(AuthException e) {
+        log.warn("未认证: {}", e.getMessage());
+        return Result.fail(ResultCode.UNAUTHORIZED.getCode(), e.getMessage());
+    }
+
+    /** 已登录但无权限：HTTP 403 + 统一 Result */
+    @ExceptionHandler(ForbiddenException.class)
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public Result<Void> handleForbidden(ForbiddenException e) {
+        log.warn("无权限: {}", e.getMessage());
+        return Result.fail(ResultCode.FORBIDDEN.getCode(), e.getMessage());
+    }
 
     /** 业务异常：可预期，打 warn，不打堆栈 */
     @ExceptionHandler(BizException.class)
