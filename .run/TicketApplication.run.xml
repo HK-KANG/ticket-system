@@ -1,0 +1,12 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="TicketApplication (local)" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.example.ticket.TicketApplication" />
+    <module name="ticket-system" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <option name="VM_PARAMETERS" value="-Xms256m -Xmx512m -XX:+UseG1GC" />
+    <option name="ALTERNATIVE_JRE_PATH_ENABLED" value="false" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

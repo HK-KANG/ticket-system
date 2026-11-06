@@ -14,6 +14,8 @@ hs_err_pid*.log
 replay_pid*.log
 
 # ===== IDE =====
+# 注意：.run/ 故意不忽略——里面的运行配置不含任何密码（密码由 .env 提供），
+# 提交后别人 clone 下来直接能 debug
 .idea/
 *.iml
 *.ipr
