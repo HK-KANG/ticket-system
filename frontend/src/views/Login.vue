@@ -34,7 +34,7 @@ import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { MOCK_USERS, USE_MOCK } from '@/api/mock'
+import { MOCK_USERS } from '@/api/mock'
 import { homePathOf } from '@/utils/role'
 
 const router = useRouter()
@@ -43,7 +43,8 @@ const user = useUserStore()
 
 const formRef = ref()
 const loading = ref(false)
-const demoUsers = USE_MOCK ? MOCK_USERS : []
+// 演示账号始终显示：Phase 3 起所有数据都是真的，这几个账号也确实存在（V2 初始化脚本）
+const demoUsers = MOCK_USERS
 
 const form = reactive({ username: '', password: '' })
 

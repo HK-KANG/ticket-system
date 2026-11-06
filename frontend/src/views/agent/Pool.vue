@@ -4,16 +4,20 @@
       <div>
         <h2 class="page-title">抢单大厅</h2>
         <p class="page-desc">
-          池中 {{ list.length }} 单待抢 · 每 30 秒自动刷新 · 最后刷新 {{ lastRefresh }}
+          本组待抢 {{ list.length }} 单 · 每 30 秒自动刷新 · 最后刷新 {{ lastRefresh }}
         </p>
       </div>
       <el-button :icon="Refresh" @click="load">立即刷新</el-button>
     </div>
 
-    <el-empty v-if="!loading && list.length === 0" description="池子空了，等新工单进来" />
+    <el-alert type="info" :closable="false" show-icon style="margin-bottom: 14px"
+              title="抢单功能在 Phase 4 上线"
+              description="现在这里展示的是真实的待派单工单（按你的技能组过滤），抢单按钮暂不可用——那需要乐观锁和并发测试，单独一个阶段做。" />
+
+    <el-empty v-if="!loading && list.length === 0" description="本组暂无待派单工单" />
 
     <div v-else class="grid" v-loading="loading">
-      <el-card v-for="t in list" :key="t.id" shadow="hover" class="card">
+      <el-card v-for="t in list" :key="t.id" shadow="hover" class="card" @click="openDetail(t)">
         <div class="card-top">
           <span class="no">{{ t.ticketNo }}</span>
           <el-tag :type="priorityType(t.priority)" size="small" effect="dark">{{ t.priority }}</el-tag>
@@ -26,16 +30,16 @@
           <span class="group">{{ t.skillGroup }}</span>
         </div>
 
-        <div class="sla" :class="{ overdue: isOverdue(t.slaDeadline) }">
+        <div class="sla" :class="{ overdue: t.overdue }">
           <el-icon><Timer /></el-icon>
-          <span>{{ isOverdue(t.slaDeadline) ? '已超时' : 'SLA 剩余 ' + remainingText(t.slaDeadline) }}</span>
+          <span>{{ t.overdue ? '已超时' : 'SLA 剩余 ' + remainingText(t.slaDeadline) }}</span>
         </div>
 
         <div class="foot">
-          <span class="time">{{ t.createTime }}</span>
-          <el-button type="primary" size="small" :loading="grabbing === t.id" @click="onGrab(t)">
-            抢单
-          </el-button>
+          <span class="time">{{ fmtSla(t.createTime) }}</span>
+          <el-tooltip content="Phase 4 实现（乐观锁抢单）" placement="top">
+            <span><el-button type="primary" size="small" disabled>抢单</el-button></span>
+          </el-tooltip>
         </div>
       </el-card>
     </div>
@@ -44,14 +48,14 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter } from 'vue-router'
 import { Refresh, Timer } from '@element-plus/icons-vue'
-import { listPool, grabTicket } from '@/api/ticket'
-import { priorityType, remainingText, isOverdue } from '@/utils/dict'
+import { pageTickets } from '@/api/ticket'
+import { priorityType, remainingText, fmtSla } from '@/utils/dict'
 
+const router = useRouter()
 const list = ref([])
 const loading = ref(false)
-const grabbing = ref(null)
 const lastRefresh = ref('-')
 
 let timer = null
@@ -60,45 +64,23 @@ let ticker = null
 async function load() {
   loading.value = true
   try {
-    list.value = await listPool()
+    // 后端按角色收窄：坐席只会拿到本组 + 待派单的单子
+    const res = await pageTickets({ status: 'PENDING', page: 1, size: 50 })
+    list.value = res.records
     lastRefresh.value = new Date().toLocaleTimeString('zh-CN')
   } finally {
     loading.value = false
   }
 }
 
-async function onGrab(ticket) {
-  try {
-    await ElMessageBox.confirm(`确认接单：${ticket.title}？`, '抢单确认', {
-      confirmButtonText: '确认接单',
-      cancelButtonText: '再看看',
-      type: 'warning'
-    })
-  } catch {
-    return
-  }
-
-  grabbing.value = ticket.id
-  try {
-    await grabTicket(ticket.id)
-    ElMessage.success('抢单成功，已进入你的处理列表')
-    list.value = list.value.filter((x) => x.id !== ticket.id)
-  } catch (e) {
-    // D3：抢单失败提示 —— 明确告诉用户「被别人抢走了」，并立刻刷新列表
-    ElMessageBox.alert(e.message || '抢单失败', '手慢了', {
-      confirmButtonText: '刷新看看',
-      type: 'error'
-    }).finally(load)
-  } finally {
-    grabbing.value = null
-  }
+function openDetail(row) {
+  router.push(`/agent/ticket/${row.id}`)
 }
 
 onMounted(() => {
   load()
-  // 30 秒自动刷新（任务书要求）
   timer = setInterval(load, 30000)
-  // 每秒刷新一次倒计时，让 SLA 在界面上真的在走
+  // 每秒重算一次倒计时，让 SLA 在界面上真的在走
   ticker = setInterval(() => {
     list.value = [...list.value]
   }, 1000)
@@ -121,6 +103,10 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
+}
+
+.card {
+  cursor: pointer;
 }
 
 .card-top {

@@ -42,6 +42,14 @@ public class GlobalExceptionHandler {
         return Result.fail(ResultCode.FORBIDDEN.getCode(), e.getMessage());
     }
 
+    /** 资源不存在：HTTP 404 + 统一 Result */
+    @ExceptionHandler(NotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public Result<Void> handleNotFound(NotFoundException e) {
+        log.warn("资源不存在: {}", e.getMessage());
+        return Result.fail(ResultCode.NOT_FOUND.getCode(), e.getMessage());
+    }
+
     /** 业务异常：可预期，打 warn，不打堆栈 */
     @ExceptionHandler(BizException.class)
     public Result<Void> handleBiz(BizException e) {

@@ -1,5 +1,4 @@
-// 字典与展示格式：状态、优先级的中文名和标签颜色集中放这里，
-// 页面里不要再散落 if/else，改文案只改一处。
+// 字典与展示格式集中放这里，页面里不要再散落 if/else，改文案只改一处。
 
 export const STATUS_LABEL = {
   PENDING: '待派单',
@@ -26,6 +25,22 @@ const PRIORITY_TAG = {
   P3: 'info'
 }
 
+/** 状态下拉/标签页用，顺序按业务流程排 */
+export const STATUS_OPTIONS = Object.keys(STATUS_LABEL).map((v) => ({ value: v, label: STATUS_LABEL[v] }))
+
+/** 分类下拉。真实项目这里应来自后端分类字典接口，目前 SlaRule 里就是这几类 */
+export const CATEGORY_OPTIONS = ['退款', '物流', '质量问题', '发票', '其他']
+
+/** 优先级 */
+export const PRIORITY_OPTIONS = ['P0', 'P1', 'P2', 'P3']
+
+export const PRIORITY_LABEL = {
+  P0: 'P0 紧急',
+  P1: 'P1 高',
+  P2: 'P2 中',
+  P3: 'P3 低'
+}
+
 export function statusLabel(code) {
   return STATUS_LABEL[code] || code || '-'
 }
@@ -41,7 +56,9 @@ export function priorityType(code) {
 /** 剩余时间文案：抢单卡片和详情页都用它 */
 export function remainingText(deadline) {
   if (!deadline) return '无 SLA'
-  const ms = new Date(deadline).getTime() - Date.now()
+  // 后端返回 "yyyy-MM-dd HH:mm:ss"，部分浏览器对空格格式解析不稳定，统一替换成 ISO 里的 T
+  const ms = new Date(String(deadline).replace(' ', 'T')).getTime() - Date.now()
+  if (Number.isNaN(ms)) return '无 SLA'
   if (ms <= 0) return '已超时'
   const h = Math.floor(ms / 3600000)
   const m = Math.floor((ms % 3600000) / 60000)
@@ -52,12 +69,11 @@ export function remainingText(deadline) {
 }
 
 export function isOverdue(deadline) {
-  return deadline ? new Date(deadline).getTime() <= Date.now() : false
+  if (!deadline) return false
+  return new Date(String(deadline).replace(' ', 'T')).getTime() <= Date.now()
 }
 
 export function fmtSla(deadline) {
   if (!deadline) return '-'
-  const d = new Date(deadline)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+  return String(deadline).slice(0, 16)
 }

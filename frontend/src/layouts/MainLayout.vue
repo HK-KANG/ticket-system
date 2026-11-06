@@ -12,10 +12,6 @@
           <span>{{ item.meta.title }}</span>
         </el-menu-item>
       </el-menu>
-
-      <div class="mock-tip" v-if="useMock">
-        当前为演示数据<br />后端接口就绪后自动切换
-      </div>
     </el-aside>
 
     <el-container>
@@ -40,12 +36,10 @@ import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { ROLE_LABEL } from '@/utils/role'
-import { USE_MOCK } from '@/api/mock'
 
 const route = useRoute()
 const router = useRouter()
 const user = useUserStore()
-const useMock = USE_MOCK
 
 // 菜单按角色过滤：路由 meta.roles 里有当前角色才显示
 const menus = computed(() => {

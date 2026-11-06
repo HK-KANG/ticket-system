@@ -43,4 +43,21 @@ public class UserController {
                 Wrappers.<User>lambdaQuery().orderByAsc(User::getId));
         return Result.ok(users.stream().map(UserVO::from).toList());
     }
+
+    /**
+     * 坐席列表，转派弹窗选人用。
+     *
+     * <p>为什么要单独一个接口而不是复用 /list：坐席也要转派，但 /list 是管理员专用的，
+     * 坐席调用会 403。这里只返回坐席、且只暴露姓名和技能组，不泄露客户和管理员账号。
+     */
+    @Operation(summary = "坐席列表", description = "坐席与管理员可用，转派时选目标坐席")
+    @RequireRole({"AGENT", "ADMIN"})
+    @GetMapping("/agents")
+    public Result<List<UserVO>> agents() {
+        List<User> users = userMapper.selectList(Wrappers.<User>lambdaQuery()
+                .eq(User::getRole, "AGENT")
+                .eq(User::getStatus, "ONLINE")
+                .orderByAsc(User::getId));
+        return Result.ok(users.stream().map(UserVO::from).toList());
+    }
 }

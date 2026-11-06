@@ -6,7 +6,7 @@
     <el-card shadow="never" style="max-width: 860px">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="标题" prop="title">
-          <el-input v-model="form.title" maxlength="100" show-word-limit placeholder="一句话说清问题，如：申请退款，商品未收到" />
+          <el-input v-model="form.title" maxlength="200" show-word-limit placeholder="一句话说清问题，如：申请退款，商品未收到" />
         </el-form-item>
 
         <el-form-item label="分类" prop="category">
@@ -23,18 +23,8 @@
         </el-form-item>
 
         <el-form-item label="问题描述" prop="content">
-          <el-input v-model="form.content" type="textarea" :rows="6" maxlength="1000" show-word-limit
+          <el-input v-model="form.content" type="textarea" :rows="6" maxlength="5000" show-word-limit
                     placeholder="订单号、发生时间、你的诉求，写得越清楚处理越快" />
-        </el-form-item>
-
-        <el-form-item label="附件">
-          <el-upload drag action="#" :auto-upload="false" :limit="3" :show-file-list="true">
-            <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-            <div class="el-upload__text">拖拽文件到这里，或<em>点击选择</em></div>
-            <template #tip>
-              <div class="el-upload__tip">最多 3 个文件，单个不超过 10MB（后端上传接口在 Phase 3 接）</div>
-            </template>
-          </el-upload>
         </el-form-item>
 
         <el-form-item>
@@ -50,8 +40,8 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { UploadFilled } from '@element-plus/icons-vue'
-import { CATEGORY_OPTIONS, PRIORITY_OPTIONS } from '@/api/mock'
+import { createTicket } from '@/api/ticket'
+import { CATEGORY_OPTIONS, PRIORITY_OPTIONS } from '@/utils/dict'
 
 const router = useRouter()
 const formRef = ref()
@@ -59,12 +49,18 @@ const submitting = ref(false)
 const categories = CATEGORY_OPTIONS
 const priorities = PRIORITY_OPTIONS
 
-const form = reactive({
-  title: '',
-  category: '',
-  priority: 'P2',
-  content: ''
-})
+const form = reactive({ title: '', category: '', priority: 'P2', content: '' })
+
+/**
+ * 幂等键。同一份表单反复提交（网络超时后重试、用户连点两次）必须用同一个 requestId，
+ * 否则后端会各建一张单。所以它在页面打开时生成一次，提交成功后才换新的。
+ */
+let requestId = newUuid()
+
+function newUuid() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID()
+  return 'req-' + Date.now() + '-' + Math.random().toString(16).slice(2, 10)
+}
 
 const rules = {
   title: [{ required: true, message: '请输入标题', trigger: 'blur' }],
@@ -80,10 +76,19 @@ async function onSubmit() {
   if (!ok) return
   submitting.value = true
   try {
-    // 后端 POST /api/ticket 在 Phase 3 实现；这里先本地成功，保证流程能走通
-    await new Promise((r) => setTimeout(r, 500))
-    ElMessage.success('提交成功，可在「我的工单」查看进度')
+    const ticket = await createTicket({
+      title: form.title,
+      category: form.category,
+      priority: form.priority,
+      content: form.content,
+      requestId
+    })
+    ElMessage.success(`提交成功，单号 ${ticket.ticketNo}`)
+    requestId = newUuid()
     router.push('/customer/tickets')
+  } catch (e) {
+    // 失败时保留 requestId：用户改完再点提交，仍算同一次请求，不会重复建单
+    ElMessage.error(e.message || '提交失败')
   } finally {
     submitting.value = false
   }
@@ -91,6 +96,7 @@ async function onSubmit() {
 
 function reset() {
   formRef.value.resetFields()
+  requestId = newUuid()
 }
 </script>
 
