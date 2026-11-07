@@ -186,6 +186,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\verify-ticket.ps1
 
 | 文档 | 内容 |
 |---|---|
+| `docs/面试题库.md` | **50+ 道针对本项目设计的面试题**，含口语版答案、追问链、薄弱处标注 |
 | `docs/项目说明.md` | 项目是干什么的、有哪些模块、每个设计为什么这么做 |
 | `docs/redis-usage.md` | **Redis 用在哪**：三个 key、代码位置、为什么不用数据库 |
 | `docs/concurrency-compare.md` | 乐观锁 vs Redis 锁：两轮实测数据、选型边界、面试口径 |
