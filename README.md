@@ -126,7 +126,7 @@ HTTP 状态码与业务语义一致：401 未登录、403 无权限、404 不存
 | 流水表只留 `create_time` | `V1__init_schema.sql` | 只增不改的事实记录，加 `update_time` 永远等于 `create_time` |
 | 不建物理外键 | `V1__init_schema.sql` | 分库分表、批量删数据时外键是枷锁；关联由应用层保证 |
 | 幂等靠唯一索引兜底 | `TicketService.create()` | Redis 的 `setIfAbsent` 也是原子的，但事务回滚后 key 还在，会误判重复 |
-| 状态机集中定义 | `TicketStatusEnum` | 避免业务代码散落 `if (status == ...)`，新增状态只改一处 |
+| 状态机集中定义 | `TicketStatusEnum.java` | 避免业务代码散落 `if (status == ...)`，新增状态只改一处 |
 | 抢单用乐观锁不用悲观锁 | `TicketService.acceptOptimistic()` | 高频短事务，`FOR UPDATE` 让 20 个请求全排队持锁，吞吐更低 |
 | 抢单用乐观锁不用 Redis 锁 | 同上 | 竞争只在一行上，数据库行锁足够，还少一个必须存活的依赖 |
 | 客户传 `internal=true` 强制降级 | `TicketService.addComment()` | 前端可以作弊，权限判断必须在服务端 |
