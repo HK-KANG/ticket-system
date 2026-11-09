@@ -111,6 +111,15 @@ ticket:
   ai:
     enabled: false
     cache-minutes: 60
+  sla:
+    # 分片总数：多实例部署时各扫一片，互不重复。单实例保持 1 即可
+    shard-total: ${TICKET_SLA_SHARD_TOTAL:1}
+    # 兜底扫描间隔（毫秒）：MQ 延迟消息负责尽量准时，这个负责保证不漏
+    scan-interval-ms: 30000
+    # 每个分片的 Redis 锁过期时间（秒），必须大于一轮扫描耗时
+    lock-seconds: 25
+    # 每轮每片最多处理多少张，避免一次拉太多
+    batch-limit: 200
   jwt:
     # 生产环境必须用环境变量覆盖；HS256 要求至少 32 字节
     secret: ${TICKET_JWT_SECRET:ticket-system-dev-secret-key-do-not-use-in-prod-2026}

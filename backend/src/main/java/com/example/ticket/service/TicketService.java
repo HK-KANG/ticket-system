@@ -9,8 +9,11 @@ import com.example.ticket.common.BizException;
 import com.example.ticket.common.ForbiddenException;
 import com.example.ticket.common.NotFoundException;
 import com.example.ticket.common.PageResult;
+import com.example.ticket.common.RedisLockHelper;
 import com.example.ticket.common.ResultCode;
 import com.example.ticket.common.enums.TicketStatusEnum;
+import com.example.ticket.config.RabbitConfig;
+import com.example.ticket.mq.SlaDelayMessage;
 import com.example.ticket.dto.TicketCloseRequest;
 import com.example.ticket.dto.TicketCommentRequest;
 import com.example.ticket.dto.TicketCreateRequest;
@@ -36,9 +39,9 @@ import com.example.ticket.vo.TicketDetailVO;
 import com.example.ticket.vo.TicketStatsVO;
 import com.example.ticket.vo.TicketVO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -48,13 +51,11 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -82,16 +83,6 @@ public class TicketService {
     /** 抢单分布式锁的 key 前缀 */
     private static final String ACCEPT_LOCK_PREFIX = "lock:ticket:accept:";
 
-    /**
-     * 释放锁的 Lua 脚本。
-     *
-     * <p>为什么必须用 Lua 而不是先 get 再 del：get 和 del 之间锁可能刚好过期并被别人拿走，
-     * 这时 del 会删掉别人的锁。Lua 脚本在 Redis 内单线程执行，判断和删除是一个原子操作。
-     */
-    private static final DefaultRedisScript<Long> UNLOCK_SCRIPT = new DefaultRedisScript<>(
-            "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end",
-            Long.class);
-
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
 
     private final TicketMapper ticketMapper;
@@ -102,11 +93,14 @@ public class TicketService {
     private final SlaRuleMapper slaRuleMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate redis;
+    private final RabbitTemplate rabbitTemplate;
+    private final RedisLockHelper lockHelper;
 
     public TicketService(TicketMapper ticketMapper, TicketLogMapper logMapper,
                          TicketCommentMapper commentMapper, TicketDispatchMapper dispatchMapper,
                          IdempotentMapper idempotentMapper, SlaRuleMapper slaRuleMapper,
-                         UserMapper userMapper, StringRedisTemplate redis) {
+                         UserMapper userMapper, StringRedisTemplate redis,
+                         RabbitTemplate rabbitTemplate, RedisLockHelper lockHelper) {
         this.ticketMapper = ticketMapper;
         this.logMapper = logMapper;
         this.commentMapper = commentMapper;
@@ -115,6 +109,8 @@ public class TicketService {
         this.slaRuleMapper = slaRuleMapper;
         this.userMapper = userMapper;
         this.redis = redis;
+        this.rabbitTemplate = rabbitTemplate;
+        this.lockHelper = lockHelper;
     }
 
     // ==================================================================
@@ -180,9 +176,43 @@ public class TicketService {
         update.setResultSnapshot(String.valueOf(ticket.getId()));
         idempotentMapper.updateById(update);
 
+        // 投递 SLA 延迟消息：到期时由消费者触发升级。
+        // 注意这里是"尽力而为"——MQ 挂了绝不能让创建工单失败，因为还有定时扫描兜底
+        sendSlaDelay(ticket);
+
         log.info("创建工单 no={} id={} creator={} sla={}",
                 ticket.getTicketNo(), ticket.getId(), user.userId(), ticket.getSlaDeadline());
         return toVOList(List.of(ticket)).get(0);
+    }
+
+    /**
+     * 把"到期时间"翻译成 MQ 的消息 TTL，投到延迟队列。
+     *
+     * <p>没有 SLA 截止时间（规则缺失）就不投——没有承诺，也就没有超时。
+     */
+    private void sendSlaDelay(Ticket ticket) {
+        if (ticket.getSlaDeadline() == null) {
+            return;
+        }
+        long ttlMs = Duration.between(LocalDateTime.now(), ticket.getSlaDeadline()).toMillis();
+        if (ttlMs <= 0) {
+            return;
+        }
+        try {
+            rabbitTemplate.convertAndSend(RabbitConfig.DELAY_EXCHANGE, RabbitConfig.ROUTING_KEY,
+                    new SlaDelayMessage(ticket.getId()),
+                    msg -> {
+                        // 每条消息自己的 TTL，而不是队列的 TTL——队里可能有不同到期的工单
+                        msg.getMessageProperties().setExpiration(String.valueOf(ttlMs));
+                        msg.getMessageProperties().setMessageId("sla-" + ticket.getId());
+                        return msg;
+                    });
+            log.info("已投递 SLA 延迟消息 ticketId={} ttl={}ms", ticket.getId(), ttlMs);
+        } catch (Exception e) {
+            // 降级：消息没投出去，30 秒内的定时扫描会把它捡起来
+            log.warn("投递 SLA 延迟消息失败，将由定时扫描兜底 ticketId={} err={}",
+                    ticket.getId(), e.getMessage());
+        }
     }
 
     // ==================================================================
@@ -444,17 +474,15 @@ public class TicketService {
     public void acceptWithLock(Long id) {
         LoginUser user = UserContext.require();
         String key = ACCEPT_LOCK_PREFIX + id;
-        String token = UUID.randomUUID().toString();
 
-        Boolean got = redis.opsForValue().setIfAbsent(key, token, Duration.ofSeconds(30));
-        if (!Boolean.TRUE.equals(got)) {
+        String lockToken = lockHelper.tryLock(key, Duration.ofSeconds(30));
+        if (lockToken == null) {
             throw new BizException(ResultCode.BIZ_ERROR, "手慢了，这单正在被其他坐席抢");
         }
         try {
             doAccept(id, user.userId(), "REDIS_LOCK");
         } finally {
-            // 无论成功失败都要释放锁，用 Lua 保证"判断是自己的锁"和"删除"是原子的
-            redis.execute(UNLOCK_SCRIPT, Collections.singletonList(key), token);
+            lockHelper.unlock(key, lockToken);
         }
     }
 
