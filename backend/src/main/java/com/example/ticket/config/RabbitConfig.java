@@ -43,6 +43,26 @@ public class RabbitConfig {
     public static final String CHECK_QUEUE = "ticket.sla.check.queue";
     public static final String ROUTING_KEY = "ticket.sla";
 
+    /** 导出队列：普通队列即可，不需要延迟，任务来一条消费一条 */
+    public static final String EXPORT_EXCHANGE = "ticket.export.exchange";
+    public static final String EXPORT_QUEUE = "ticket.export.queue";
+    public static final String EXPORT_ROUTING_KEY = "ticket.export";
+
+    @Bean
+    public DirectExchange exportExchange() {
+        return new DirectExchange(EXPORT_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public Queue exportQueue() {
+        return QueueBuilder.durable(EXPORT_QUEUE).build();
+    }
+
+    @Bean
+    public Binding exportBinding() {
+        return BindingBuilder.bind(exportQueue()).to(exportExchange()).with(EXPORT_ROUTING_KEY);
+    }
+
     @Bean
     public DirectExchange delayExchange() {
         return new DirectExchange(DELAY_EXCHANGE, true, false);

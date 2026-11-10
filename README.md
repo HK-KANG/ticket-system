@@ -113,6 +113,11 @@ cd frontend && npm install && npm run dev
 | POST | `/api/ticket/{id}/auto-dispatch` | 管理员 | 自动派单给本组最闲的在线坐席 |
 | POST | `/api/ticket/{id}/resolve` | 处理人/管理员 | 标记已解决 |
 | GET | `/api/ticket/stats` | 管理员 | 状态/分类分布、SLA 达成率、近 7 天趋势 |
+| GET | `/api/ticket/cursor` | 登录 | 游标分页（深翻页不退化），翻多深都一样快 |
+| POST | `/api/export/ticket` | 管理员 | 发起异步导出，立即返回任务号 |
+| GET | `/api/export/tasks` | 登录 | 我的导出记录（前端轮询进度用） |
+| GET | `/api/export/{id}/download` | 发起人/管理员 | 下载 Excel |
+| POST | `/api/job/sla-scan` | 管理员 | 手动触发一次 SLA 超时扫描（验收用） |
 
 统一响应格式：`{ "code": 0, "message": "成功", "data": ..., "traceId": "..." }`
 HTTP 状态码与业务语义一致：401 未登录、403 无权限、404 不存在、400 参数错误。

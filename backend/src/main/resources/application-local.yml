@@ -113,6 +113,11 @@ ticket:
   ai:
     enabled: false
     cache-minutes: 60
+  export:
+    # 导出文件落盘目录（相对项目根目录）。生产应挂独立数据盘，并配定时清理
+    dir: ${TICKET_EXPORT_DIR:./data/exports}
+    # 单次导出上限：防止一个请求把 100 万行拉出来把内存和磁盘打爆
+    max-rows: 50000
   sla:
     # 分片总数：多实例部署时各扫一片，互不重复。单实例保持 1 即可
     shard-total: ${TICKET_SLA_SHARD_TOTAL:1}
