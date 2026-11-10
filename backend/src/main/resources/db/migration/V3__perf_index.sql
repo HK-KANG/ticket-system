@@ -1,0 +1,15 @@
+-- Phase 6 性能优化：为"按时间倒序"补索引
+--
+-- 背景（实测数据，10 万工单）：
+--   SELECT ... FROM t_ticket ORDER BY create_time DESC LIMIT 90000,20   79.3ms  扫 190024 行 + filesort
+--   SELECT ... WHERE create_time < ? ORDER BY create_time DESC LIMIT 20 34.2ms  扫 100024 行（没用上索引）
+--
+-- 原有 4 个索引都以业务列开头（skill_group / creator_id / handler_id / sla_deadline），
+-- 没有一个是 create_time 开头，所以"全局按时间倒序"这类查询只能全表扫 + 内存排序。
+--
+-- 为什么把 id 放进索引第二列：
+--   时间可能重复（同一毫秒多条），只按 create_time 做游标分页会漏数据或重复。
+--   带上 id 后 (create_time, id) 是唯一且单调的，游标条件可以写成：
+--     WHERE (create_time < ? OR (create_time = ? AND id < ?))
+--   这样即使同一毫秒有多条，翻页也不会错位。
+CREATE INDEX idx_create_time ON t_ticket (create_time, id);

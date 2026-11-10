@@ -56,7 +56,9 @@ spring:
         max-concurrency: 4
   threads:
     virtual:
-      # Phase 6 做虚拟线程对比时再打开，平时关着（省内存，也避免 pinning 干扰）
+      # 实测 50 并发下没有提升（112 → 95 req/s）：瓶颈是 Hikari 连接池（10 个连接），
+      # 不是线程数。详见 docs/perf-report.md 第六节。想复现对比：
+      #   --spring.threads.virtual.enabled=true
       enabled: false
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss

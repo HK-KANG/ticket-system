@@ -1,5 +1,6 @@
 package com.example.ticket.controller;
 
+import com.example.ticket.common.CursorResult;
 import com.example.ticket.common.PageResult;
 import com.example.ticket.common.RequireRole;
 import com.example.ticket.common.Result;
@@ -15,6 +16,7 @@ import com.example.ticket.vo.TicketVO;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -22,6 +24,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.LocalDateTime;
 
 /**
  * 工单接口。
@@ -60,6 +64,21 @@ public class TicketController {
     @GetMapping("/page")
     public Result<PageResult<TicketVO>> page(TicketQuery query) {
         return Result.ok(ticketService.page(query));
+    }
+
+    /**
+     * 游标分页（性能优化版）。不能跳页，只能一直往下翻，但翻多深耗时都一样。
+     *
+     * <p>首次请求不带参数；后续请求把上一次返回的 nextCreateTime / nextId 原样带回来。
+     */
+    @Operation(summary = "游标分页", description = "深翻页不退化；返回 nextCreateTime + nextId 作为下一页锚点")
+    @GetMapping("/cursor")
+    public Result<CursorResult<TicketVO>> cursor(
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime lastCreateTime,
+            @RequestParam(required = false) Long lastId,
+            @RequestParam(defaultValue = "20") Integer size) {
+        return Result.ok(ticketService.pageByCursor(lastCreateTime, lastId, size));
     }
 
     /**
