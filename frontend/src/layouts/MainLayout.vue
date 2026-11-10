@@ -7,7 +7,7 @@
       </div>
 
       <el-menu :default-active="route.path" router class="menu">
-        <el-menu-item v-for="item in menus" :key="item.path" :index="item.path">
+        <el-menu-item v-for="item in menus" :key="item.path" :index="absPath(item.path)">
           <el-icon><component :is="item.meta.icon" /></el-icon>
           <span>{{ item.meta.title }}</span>
         </el-menu-item>
@@ -46,6 +46,19 @@ const menus = computed(() => {
   const all = router.options.routes.find((r) => r.path === '/')?.children || []
   return all.filter((r) => !r.meta?.hidden && (!r.meta?.roles || r.meta.roles.includes(user.role)))
 })
+
+/**
+ * 把子路由的相对 path 补成绝对路径。
+ *
+ * <p>必须这么做，否则菜单点了会"没反应"：
+ * el-menu 的 router 模式把 index 原样交给 router.push，
+ * 而路由表里子路由写的是相对路径（admin/export）。
+ * vue-router 收到相对路径会当成"相对当前路由"来解析：
+ *   当前 /admin/tickets + admin/export → /admin/admin/export
+ * 这个地址不存在，被兜底路由 redirect 到 '/'，
+ * 再被守卫按角色送回首页 —— 用户看到的就是"点了没反应"。
+ */
+const absPath = (p) => (p.startsWith('/') ? p : '/' + p)
 
 const roleLabel = computed(() => ROLE_LABEL[user.role] || '未登录')
 
